@@ -76,6 +76,18 @@ yarn-error.log*
 
 ```
 
+# postcss.config.js
+
+```js
+module.exports = {
+  plugins: {
+    tailwindcss: {},
+    autoprefixer: {},
+  },
+}
+
+```
+
 # public/bad-posture-demo.png
 
 This is a binary file of the type: Image
@@ -342,112 +354,109 @@ Runs the app in development mode. Open [http://localhost:3000](http://localhost:
 # src/App.js
 
 ```js
-import './App.css';
-import React, {useRef, useEffect} from 'react';
-import {Pose} from '@mediapipe/pose';
+import React, { useRef, useEffect, useState } from 'react';
+import { Pose } from '@mediapipe/pose';
 import * as cam from '@mediapipe/camera_utils';
 import * as mediapipePose from '@mediapipe/pose';
-import {drawConnectors, drawLandmarks} from '@mediapipe/drawing_utils'
+import { drawConnectors, drawLandmarks } from '@mediapipe/drawing_utils';
 import Webcam from 'react-webcam';
-import {Menu, btnSelected, setBtn} from './components/Menu';
-import {LoadingScreen} from './components/LoadingScreen';
-import {
-  changeStyleProperty,
-  badPosture,
-  showNotification,
-} from './utilities'
+import { Alert, AlertDescription } from '@/components/ui/alert';
 
-function App() {
-  //reference to canvas & webcam
+const PostureGuard = () => {
   const canvasRef = useRef(null);
   const webcamRef = useRef(null);
-
-  //reference to the current posture
-  const postureRef = useRef(null); //value of 1 is bad, 0 is good, -1 is undetected
+  const postureRef = useRef(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [calibrationMode, setCalibrationMode] = useState(true);
+  const [postureStatus, setPostureStatus] = useState('UNKNOWN');
   
-  let goodPosture = null; //variable stores the pose landmarks for the user's "good" posture
-  let loaded = false; //if the pose estimation model has loaded or not
-  let badPostureCount = 0; //variable keeps track of the # of frames the user has bad posture
+  let goodPosture = null;
+  let badPostureCount = 0;
 
-  //run this function when pose results are determined
-  function onResults(results){
-    if(!loaded){ //remove loader when it is finished
-      loaded = true;
-      console.log("HPE model finished loading.");
-      changeStyleProperty("--loader-display","none");
+  const onResults = (results) => {
+    if (isLoading) {
+      setIsLoading(false);
     }
 
-    if (!results.poseLandmarks) { //if the model is unable to detect a pose 
-      console.log("No pose detected.");
-      postureRef.current = -1;//change pose state to "undetected", can't track pose
-      changeStyleProperty("--btn-color","rgba(0, 105, 237, 0.25)"); //fade out the calubrate button by reducing opacity
+    if (!results.poseLandmarks) {
+      postureRef.current = -1;
       return;
     }
 
-    let landmarks = results.poseLandmarks;
+    const landmarks = results.poseLandmarks;
     postureRef.current = null;
-    changeStyleProperty("--btn-color","rgba(0, 105, 237, 1)"); //make the calibrate button solid
 
-    canvasRef.current.width = webcamRef.current.video.videoWidth
-    canvasRef.current.height = webcamRef.current.video.videoHeight
-
+    // Canvas drawing logic
     const canvasElement = canvasRef.current;
-    const canvasCtx = canvasElement.getContext("2d");  //canvas context
+    const canvasCtx = canvasElement.getContext("2d");
+    
+    canvasElement.width = webcamRef.current.video.videoWidth;
+    canvasElement.height = webcamRef.current.video.videoHeight;
+    
     canvasCtx.save();
     canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
     
-    canvasCtx.globalCompositeOperation = 'source-over';
+    // Draw pose landmarks with a modern aesthetic
     drawConnectors(canvasCtx, results.poseLandmarks, mediapipePose.POSE_CONNECTIONS,
-                   {color: '#fff'/*'#00FF00'*/, lineWidth: 4});
+      { color: '#4F46E5', lineWidth: 2 });
     drawLandmarks(canvasCtx, results.poseLandmarks,
-                  {color: '#fff'/*'#FF0000'*/, lineWidth: 2});
+      { color: '#818CF8', lineWidth: 1 });
     canvasCtx.restore();
 
-    if(btnSelected){ //if the calibrate button was selected
-      goodPosture = landmarks; //obtain a copy of the "good pose"
-      console.log("Calibrate button was clicked. New landmarks have been saved.");
-      setBtn(false);
-    }
-
-    if(!goodPosture){ //the calibrate button has not been selected yet
-      return;
-    }
-    
-    //determine if the user's posture is bad or not
-    if(badPosture(landmarks, goodPosture)){
-      badPostureCount++;
-      changeStyleProperty('--posture-status',"'BAD'"); //maybe move this inside conditional
-      if(badPostureCount >= 60){ //60 frames = 2 seconds of bad posture
-        showNotification("Correct your posture!");
+    // Posture analysis logic
+    if (goodPosture) {
+      const isBadPosture = badPosture(landmarks, goodPosture);
+      setPostureStatus(isBadPosture ? 'BAD' : 'GOOD');
+      
+      if (isBadPosture) {
+        badPostureCount++;
+        if (badPostureCount >= 60) {
+          showNotification("Time to correct your posture!");
+          badPostureCount = 0;
+        }
+      } else {
         badPostureCount = 0;
       }
-    }else{
-      badPostureCount = 0;
-      changeStyleProperty('--posture-status',"'GOOD'");
     }
-  }
+  };
 
-  useEffect(()=>{
-    const pose = new Pose({locateFile: (file) => {
-      return `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`;
-    }});
+  const calibratePose = () => {
+    if (postureRef.current === -1) return;
+    goodPosture = results.poseLandmarks;
+    setCalibrationMode(false);
+  };
+
+  // Utility functions
+  const badPosture = (curr, ideal) => {
+    const lookingDown = (curr[0].y - ideal[0].y) > (ideal[9].y - ideal[0].y);
+    const faceIsClose = (ideal[0].z - curr[0].z) > 0.5;
+    return lookingDown || faceIsClose;
+  };
+
+  const showNotification = (text) => {
+    if (Notification.permission === "granted") {
+      new Notification(text);
+    }
+  };
+
+  useEffect(() => {
+    const pose = new Pose({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
+    });
+
     pose.setOptions({
       modelComplexity: 1,
       smoothLandmarks: true,
-      enableSegmentation: false,//true,
-      smoothSegmentation: false,//true,
       minDetectionConfidence: 0.5,
       minTrackingConfidence: 0.5
     });
+
     pose.onResults(onResults);
-    
-    if(
-      typeof webcamRef.current !== 'undefined' &&
-      webcamRef.current !== null
-    ) {
+
+    if (webcamRef.current) {
       const camera = new cam.Camera(webcamRef.current.video, {
-        onFrame: async () => { //this block runs once every frame
-          await pose.send({image: webcamRef.current.video});
+        onFrame: async () => {
+          await pose.send({ image: webcamRef.current.video });
         },
         width: 640,
         height: 480
@@ -455,40 +464,96 @@ function App() {
       camera.start();
     }
 
-    if(!("Notification" in window)) {
-      alert("Browser does not support desktop notification");
-    } else {
-      Notification.requestPermission();
-    }
-
+    Notification.requestPermission();
   }, []);
 
   return (
-    <div className="App">
-      <LoadingScreen/>
-      <Menu
-        postureRef={postureRef}
-      />
-      <div className="display">
-        <Webcam
-          ref={webcamRef}
-          className="webcam"
-          width="640px"
-          height="480px"
-        />
-        <canvas
-          ref = {canvasRef}
-          className="canvas"
-          width="640px"
-          height="480px"
-        />
+    <div className="min-h-screen bg-gray-50 py-8">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="text-center mb-8">
+          <h1 className="text-4xl font-bold text-gray-900 mb-2">PostureGuard</h1>
+          <p className="text-lg text-gray-600">Your personal posture assistant</p>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
+          <div className="relative rounded-lg overflow-hidden shadow-lg bg-white p-6">
+            <div className="aspect-w-4 aspect-h-3">
+              <Webcam
+                ref={webcamRef}
+                className="absolute inset-0 w-full h-full object-cover rounded-lg"
+                width={640}
+                height={480}
+              />
+              <canvas
+                ref={canvasRef}
+                className="absolute inset-0 w-full h-full"
+                width={640}
+                height={480}
+              />
+            </div>
+          </div>
+
+          <div className="space-y-6">
+            {isLoading ? (
+              <Alert>
+                <AlertDescription>
+                  Loading pose detection model... Please enable your camera.
+                </AlertDescription>
+              </Alert>
+            ) : (
+              <div className="bg-white rounded-lg shadow-lg p-6 space-y-6">
+                <div className="space-y-4">
+                  <h2 className="text-2xl font-semibold text-gray-900">
+                    {calibrationMode ? 'Calibration Mode' : 'Tracking Mode'}
+                  </h2>
+                  
+                  {calibrationMode ? (
+                    <div className="space-y-4">
+                      <p className="text-gray-600">
+                        Please sit with good posture and click calibrate to begin tracking.
+                      </p>
+                      <ol className="list-decimal list-inside space-y-2 text-gray-600">
+                        <li>Position your webcam at arm's length</li>
+                        <li>Sit upright with good posture</li>
+                        <li>Ensure your head and shoulders are visible</li>
+                      </ol>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="flex items-center space-x-2">
+                        <span className="text-gray-700">Current Posture:</span>
+                        <span className={`font-semibold ${
+                          postureStatus === 'GOOD' ? 'text-green-600' : 
+                          postureStatus === 'BAD' ? 'text-red-600' : 
+                          'text-gray-600'
+                        }`}>
+                          {postureStatus}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                  
+                  <button
+                    onClick={calibratePose}
+                    disabled={postureRef.current === -1}
+                    className={`w-full py-2 px-4 rounded-md text-white font-medium transition-colors
+                      ${postureRef.current === -1 
+                        ? 'bg-gray-400 cursor-not-allowed' 
+                        : 'bg-indigo-600 hover:bg-indigo-700'}`}
+                  >
+                    {calibrationMode ? 'Calibrate' : 'Recalibrate'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
-}
+};
 
-export default App;
-
+export default PostureGuard;
 ```
 
 # src/App.test.js
@@ -605,6 +670,211 @@ export function PostureStatus(props) {
       )
     }
 }
+```
+
+# src/components/ui/alert.js
+
+```js
+import React, { useRef, useEffect, useState } from 'react';
+import { Pose } from '@mediapipe/pose';
+import * as cam from '@mediapipe/camera_utils';
+import * as mediapipePose from '@mediapipe/pose';
+import { drawConnectors, drawLandmarks } from '@mediapipe/drawing_utils';
+import Webcam from 'react-webcam';
+import { Alert, AlertDescription } from './components/ui/alert';
+
+const PostureGuard = () => {
+  const canvasRef = useRef(null);
+  const webcamRef = useRef(null);
+  const postureRef = useRef(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [calibrationMode, setCalibrationMode] = useState(true);
+  const [postureStatus, setPostureStatus] = useState('UNKNOWN');
+  
+  let goodPosture = null;
+  let badPostureCount = 0;
+
+  const onResults = (results) => {
+    if (isLoading) {
+      setIsLoading(false);
+    }
+
+    if (!results.poseLandmarks) {
+      postureRef.current = -1;
+      return;
+    }
+
+    const landmarks = results.poseLandmarks;
+    postureRef.current = null;
+
+    // Canvas drawing logic
+    const canvasElement = canvasRef.current;
+    const canvasCtx = canvasElement.getContext("2d");
+    
+    canvasElement.width = webcamRef.current.video.videoWidth;
+    canvasElement.height = webcamRef.current.video.videoHeight;
+    
+    canvasCtx.save();
+    canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+    
+    // Draw pose landmarks with a modern aesthetic
+    drawConnectors(canvasCtx, results.poseLandmarks, mediapipePose.POSE_CONNECTIONS,
+      { color: '#4F46E5', lineWidth: 2 });
+    drawLandmarks(canvasCtx, results.poseLandmarks,
+      { color: '#818CF8', lineWidth: 1 });
+    canvasCtx.restore();
+
+    // Posture analysis logic
+    if (goodPosture) {
+      const isBadPosture = badPosture(landmarks, goodPosture);
+      setPostureStatus(isBadPosture ? 'BAD' : 'GOOD');
+      
+      if (isBadPosture) {
+        badPostureCount++;
+        if (badPostureCount >= 60) {
+          showNotification("Time to correct your posture!");
+          badPostureCount = 0;
+        }
+      } else {
+        badPostureCount = 0;
+      }
+    }
+  };
+
+  const calibratePose = () => {
+    if (postureRef.current === -1) return;
+    goodPosture = results.poseLandmarks;
+    setCalibrationMode(false);
+  };
+
+  // Utility functions
+  const badPosture = (curr, ideal) => {
+    const lookingDown = (curr[0].y - ideal[0].y) > (ideal[9].y - ideal[0].y);
+    const faceIsClose = (ideal[0].z - curr[0].z) > 0.5;
+    return lookingDown || faceIsClose;
+  };
+
+  const showNotification = (text) => {
+    if (Notification.permission === "granted") {
+      new Notification(text);
+    }
+  };
+
+  useEffect(() => {
+    const pose = new Pose({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
+    });
+
+    pose.setOptions({
+      modelComplexity: 1,
+      smoothLandmarks: true,
+      minDetectionConfidence: 0.5,
+      minTrackingConfidence: 0.5
+    });
+
+    pose.onResults(onResults);
+
+    if (webcamRef.current) {
+      const camera = new cam.Camera(webcamRef.current.video, {
+        onFrame: async () => {
+          await pose.send({ image: webcamRef.current.video });
+        },
+        width: 640,
+        height: 480
+      });
+      camera.start();
+    }
+
+    Notification.requestPermission();
+  }, []);
+
+  return (
+    <div className="min-h-screen bg-gray-50 py-8">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="text-center mb-8">
+          <h1 className="text-4xl font-bold text-gray-900 mb-2">PostureGuard</h1>
+          <p className="text-lg text-gray-600">Your personal posture assistant</p>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
+          <div className="relative rounded-lg overflow-hidden shadow-lg bg-white p-6">
+            <div className="aspect-w-4 aspect-h-3">
+              <Webcam
+                ref={webcamRef}
+                className="absolute inset-0 w-full h-full object-cover rounded-lg"
+                width={640}
+                height={480}
+              />
+              <canvas
+                ref={canvasRef}
+                className="absolute inset-0 w-full h-full"
+                width={640}
+                height={480}
+              />
+            </div>
+          </div>
+
+          <div className="space-y-6">
+            {isLoading ? (
+              <Alert>
+                <AlertDescription>
+                  Loading pose detection model... Please enable your camera.
+                </AlertDescription>
+              </Alert>
+            ) : (
+              <div className="bg-white rounded-lg shadow-lg p-6 space-y-6">
+                <div className="space-y-4">
+                  <h2 className="text-2xl font-semibold text-gray-900">
+                    {calibrationMode ? 'Calibration Mode' : 'Tracking Mode'}
+                  </h2>
+                  
+                  {calibrationMode ? (
+                    <div className="space-y-4">
+                      <p className="text-gray-600">
+                        Please sit with good posture and click calibrate to begin tracking.
+                      </p>
+                      <ol className="list-decimal list-inside space-y-2 text-gray-600">
+                        <li>Position your webcam at arm's length</li>
+                        <li>Sit upright with good posture</li>
+                        <li>Ensure your head and shoulders are visible</li>
+                      </ol>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="flex items-center space-x-2">
+                        <span className="text-gray-700">Current Posture:</span>
+                        <span className={`font-semibold ${
+                          postureStatus === 'GOOD' ? 'text-green-600' : 
+                          postureStatus === 'BAD' ? 'text-red-600' : 
+                          'text-gray-600'
+                        }`}>
+                          {postureStatus}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                  
+                  <button
+                    onClick={calibratePose}
+                    disabled={postureRef.current === -1}
+                    className={`w-full py-2 px-4 rounded-md text-white font-medium transition-colors
+                      ${postureRef.current === -1 
+                        ? 'bg-gray-400 cursor-not-allowed' 
+                        : 'bg-indigo-600 hover:bg-indigo-700'}`}
+                  >
+                    {calibrationMode ? 'Calibrate' : 'Recalibrate'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default PostureGuard;
 ```
 
 # src/index.css
