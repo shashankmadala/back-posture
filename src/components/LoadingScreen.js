@@ -1,8 +1,10 @@
-export function LoadingScreen(){
-    return(
+export function LoadingScreen() {
+    return (
         <div className="loading-screen">
             <div className="lds-dual-ring"/>
-            <p>Loading the pose estimation model... In the meantime, please enable your camera!</p>
+            <p style={{ fontFamily: 'Noto Sans Telugu, sans-serif' }}>
+                లోడ్ అవుతోంది... దయచేసి మీ కెమెరాను ఆన్ చేయండి
+            </p>
         </div>
     )
 }

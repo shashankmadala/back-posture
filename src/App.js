@@ -1,5 +1,5 @@
 import './App.css';
-import React, {useRef, useEffect} from 'react';
+import React, {useRef, useEffect, useState} from 'react';
 import {Pose} from '@mediapipe/pose';
 import * as cam from '@mediapipe/camera_utils';
 import * as mediapipePose from '@mediapipe/pose';
@@ -12,7 +12,7 @@ import {
   badPosture,
   showNotification,
   updatePostureStatus
-} from './utilities'
+} from './utilities';
 
 function App() {
   const canvasRef = useRef(null);
@@ -22,6 +22,20 @@ function App() {
   let goodPosture = null;
   let loaded = false;
   let badPostureCount = 0;
+
+  const [dailyStats, setDailyStats] = useState(() => {
+    const saved = localStorage.getItem('dailyPostureStats');
+    return saved ? JSON.parse(saved) : {
+      date: new Date().toLocaleDateString(),
+      goodPostureTime: 0,
+      badPostureTime: 0,
+      lastUpdate: Date.now()
+    };
+  });
+
+  useEffect(() => {
+    localStorage.setItem('dailyPostureStats', JSON.stringify(dailyStats));
+  }, [dailyStats]);
 
   function onResults(results) {
     if(!loaded) {
@@ -34,7 +48,7 @@ function App() {
       console.log("No pose detected.");
       postureRef.current = -1;
       changeStyleProperty("--btn-color","rgba(0, 105, 237, 0.25)");
-      changeStyleProperty('--posture-status', '"UNKNOWN"');
+      changeStyleProperty('--posture-status', '"తెలియదు"');
       changeStyleProperty('--posture-status-color', '#6b7280');
       return;
     }
@@ -74,12 +88,28 @@ function App() {
       badPostureCount++;
       updatePostureStatus(false);
       if(badPostureCount >= 60) {
-        showNotification("Fix your posture!");
+        showNotification("వెన్నెముక సరిగ్గా ఉంచండి!");
         badPostureCount = 0;
       }
+      // Update bad posture time
+      const now = Date.now();
+      const timeDiff = (now - dailyStats.lastUpdate) / 1000;
+      setDailyStats(prev => ({
+        ...prev,
+        badPostureTime: prev.badPostureTime + timeDiff,
+        lastUpdate: now
+      }));
     } else {
       badPostureCount = 0;
       updatePostureStatus(true);
+      // Update good posture time
+      const now = Date.now();
+      const timeDiff = (now - dailyStats.lastUpdate) / 1000;
+      setDailyStats(prev => ({
+        ...prev,
+        goodPostureTime: prev.goodPostureTime + timeDiff,
+        lastUpdate: now
+      }));
     }
   }
 
@@ -115,12 +145,27 @@ function App() {
     } else {
       Notification.requestPermission();
     }
+
+    // Check for midnight reset
+    const midnightCheck = setInterval(() => {
+      const currentDate = new Date().toLocaleDateString();
+      if (currentDate !== dailyStats.date) {
+        setDailyStats({
+          date: currentDate,
+          goodPostureTime: 0,
+          badPostureTime: 0,
+          lastUpdate: Date.now()
+        });
+      }
+    }, 60000); // Check every minute
+
+    return () => clearInterval(midnightCheck);
   }, []);
 
   return (
     <div className="App">
       <LoadingScreen/>
-      <Menu postureRef={postureRef} />
+      <Menu postureRef={postureRef} dailyStats={dailyStats} />
       <div className="display">
         <Webcam
           ref={webcamRef}

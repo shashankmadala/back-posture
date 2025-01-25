@@ -10,6 +10,7 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
+    font-size: 1.2rem;
 }
 
 .lds-dual-ring {
@@ -43,65 +44,90 @@
     display: flex;
     flex-direction: row;
     justify-content: space-evenly;
-    align-items: center;
-    height: 100vh;
-    width: 100vw;
+    align-items: flex-start;
+    padding: 2rem;
+    min-height: 100vh;
+    background-color: #f3f4f6;
 }
 
 .menu {
-    width:35%;
+    width: 35%;
+    padding: 2rem;
+    background: white;
+    border-radius: 1rem;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
 }
 
-.logo {
-    width: 50%;
-    padding-bottom: 1em;
+.display {
+    position: relative;
+    width: 640px;
+    height: 480px;
+    background: white;
+    border-radius: 1rem;
+    overflow: hidden;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
 }
 
 .canvas {
-    border-radius: 0.5em;
-    z-index: 99;
-    position: relative;
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 2;
 }
 
 .webcam {
-    border-radius: 0.5em;
     position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.posture-status {
+    margin-top: 1rem;
+    font-size: 1.25rem;
 }
 
 .posture-status::after {
     content: var(--posture-status);
     color: var(--posture-status-color);
+    margin-left: 0.5rem;
 }
 
 .btn {
-    font-size: 1em;
-    display: inline-block;
-    border: none;
-    padding: 0.75em 1.5em;
-    margin: 0;
-    text-decoration: none;
+    font-size: 1.25rem;
+    width: 100%;
+    padding: 1rem;
     background: var(--btn-color);
-    color: #ffffff;
+    color: white;
+    border: none;
+    border-radius: 0.5rem;
     cursor: pointer;
-    text-align: center;
-    border-radius: 0.25em;
+    transition: background-color 0.2s;
 }
 
-/*responsiveness*/
-@media (max-width: 1000px) {
+.btn:hover {
+    opacity: 0.9;
+}
+
+.btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Responsive fixes */
+@media (max-width: 1200px) {
     .App {
-        flex-direction: column-reverse;
-        height: auto;
-        padding: 1.5em 0;
+        flex-direction: column;
+        align-items: center;
+        gap: 2rem;
     }
 
     .menu {
-        width:640px;
-        padding-top: 1em;
-    }
-
-    .logo {
-        width: 25%;
-        padding-bottom: 0.25em;
+        width: 640px;
+        max-width: 90%;
     }
 }

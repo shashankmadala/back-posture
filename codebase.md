@@ -71,6 +71,12 @@ yarn-error.log*
       "last 1 firefox version",
       "last 1 safari version"
     ]
+  },
+  "devDependencies": {
+    "@tailwindcss/aspect-ratio": "^0.4.2",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.5.1",
+    "tailwindcss": "^3.4.17"
   }
 }
 
@@ -124,6 +130,8 @@ This is a binary file of the type: Image
       user's mobile device or desktop. See https://developers.google.com/web/fundamentals/web-app-manifest/
     -->
     <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Telugu:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Telugu:wght@400;500;600;700&display=swap" rel="stylesheet">
     <!--
       Notice the use of %PUBLIC_URL% in the tags above.
       It will be replaced with the URL of the `public` folder during the build.
@@ -254,6 +262,7 @@ Runs the app in development mode. Open [http://localhost:3000](http://localhost:
     flex-direction: column;
     align-items: center;
     justify-content: center;
+    font-size: 1.2rem;
 }
 
 .lds-dual-ring {
@@ -287,66 +296,91 @@ Runs the app in development mode. Open [http://localhost:3000](http://localhost:
     display: flex;
     flex-direction: row;
     justify-content: space-evenly;
-    align-items: center;
-    height: 100vh;
-    width: 100vw;
+    align-items: flex-start;
+    padding: 2rem;
+    min-height: 100vh;
+    background-color: #f3f4f6;
 }
 
 .menu {
-    width:35%;
+    width: 35%;
+    padding: 2rem;
+    background: white;
+    border-radius: 1rem;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
 }
 
-.logo {
-    width: 50%;
-    padding-bottom: 1em;
+.display {
+    position: relative;
+    width: 640px;
+    height: 480px;
+    background: white;
+    border-radius: 1rem;
+    overflow: hidden;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
 }
 
 .canvas {
-    border-radius: 0.5em;
-    z-index: 99;
-    position: relative;
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 2;
 }
 
 .webcam {
-    border-radius: 0.5em;
     position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.posture-status {
+    margin-top: 1rem;
+    font-size: 1.25rem;
 }
 
 .posture-status::after {
     content: var(--posture-status);
     color: var(--posture-status-color);
+    margin-left: 0.5rem;
 }
 
 .btn {
-    font-size: 1em;
-    display: inline-block;
-    border: none;
-    padding: 0.75em 1.5em;
-    margin: 0;
-    text-decoration: none;
+    font-size: 1.25rem;
+    width: 100%;
+    padding: 1rem;
     background: var(--btn-color);
-    color: #ffffff;
+    color: white;
+    border: none;
+    border-radius: 0.5rem;
     cursor: pointer;
-    text-align: center;
-    border-radius: 0.25em;
+    transition: background-color 0.2s;
 }
 
-/*responsiveness*/
-@media (max-width: 1000px) {
+.btn:hover {
+    opacity: 0.9;
+}
+
+.btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Responsive fixes */
+@media (max-width: 1200px) {
     .App {
-        flex-direction: column-reverse;
-        height: auto;
-        padding: 1.5em 0;
+        flex-direction: column;
+        align-items: center;
+        gap: 2rem;
     }
 
     .menu {
-        width:640px;
-        padding-top: 1em;
-    }
-
-    .logo {
-        width: 25%;
-        padding-bottom: 0.25em;
+        width: 640px;
+        max-width: 90%;
     }
 }
 ```
@@ -354,109 +388,141 @@ Runs the app in development mode. Open [http://localhost:3000](http://localhost:
 # src/App.js
 
 ```js
-import React, { useRef, useEffect, useState } from 'react';
-import { Pose } from '@mediapipe/pose';
+import './App.css';
+import React, {useRef, useEffect, useState} from 'react';
+import {Pose} from '@mediapipe/pose';
 import * as cam from '@mediapipe/camera_utils';
 import * as mediapipePose from '@mediapipe/pose';
-import { drawConnectors, drawLandmarks } from '@mediapipe/drawing_utils';
+import {drawConnectors, drawLandmarks} from '@mediapipe/drawing_utils'
 import Webcam from 'react-webcam';
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import {Menu, btnSelected, setBtn} from './components/Menu';
+import {LoadingScreen} from './components/LoadingScreen';
+import {
+  changeStyleProperty,
+  badPosture,
+  showNotification,
+  updatePostureStatus
+} from './utilities';
 
-const PostureGuard = () => {
+function App() {
   const canvasRef = useRef(null);
   const webcamRef = useRef(null);
   const postureRef = useRef(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [calibrationMode, setCalibrationMode] = useState(true);
-  const [postureStatus, setPostureStatus] = useState('UNKNOWN');
   
   let goodPosture = null;
+  let loaded = false;
   let badPostureCount = 0;
 
-  const onResults = (results) => {
-    if (isLoading) {
-      setIsLoading(false);
+  const [dailyStats, setDailyStats] = useState(() => {
+    const saved = localStorage.getItem('dailyPostureStats');
+    return saved ? JSON.parse(saved) : {
+      date: new Date().toLocaleDateString(),
+      goodPostureTime: 0,
+      badPostureTime: 0,
+      lastUpdate: Date.now()
+    };
+  });
+
+  useEffect(() => {
+    localStorage.setItem('dailyPostureStats', JSON.stringify(dailyStats));
+  }, [dailyStats]);
+
+  function onResults(results) {
+    if(!loaded) {
+      loaded = true;
+      console.log("HPE model finished loading.");
+      changeStyleProperty("--loader-display","none");
     }
 
     if (!results.poseLandmarks) {
+      console.log("No pose detected.");
       postureRef.current = -1;
+      changeStyleProperty("--btn-color","rgba(0, 105, 237, 0.25)");
+      changeStyleProperty('--posture-status', '"తెలియదు"');
+      changeStyleProperty('--posture-status-color', '#6b7280');
       return;
     }
 
-    const landmarks = results.poseLandmarks;
+    let landmarks = results.poseLandmarks;
     postureRef.current = null;
+    changeStyleProperty("--btn-color","rgba(0, 105, 237, 1)");
 
-    // Canvas drawing logic
+    canvasRef.current.width = webcamRef.current.video.videoWidth;
+    canvasRef.current.height = webcamRef.current.video.videoHeight;
+
     const canvasElement = canvasRef.current;
     const canvasCtx = canvasElement.getContext("2d");
-    
-    canvasElement.width = webcamRef.current.video.videoWidth;
-    canvasElement.height = webcamRef.current.video.videoHeight;
-    
     canvasCtx.save();
     canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
     
-    // Draw pose landmarks with a modern aesthetic
+    canvasCtx.globalCompositeOperation = 'source-over';
     drawConnectors(canvasCtx, results.poseLandmarks, mediapipePose.POSE_CONNECTIONS,
-      { color: '#4F46E5', lineWidth: 2 });
+                   {color: '#fff', lineWidth: 4});
     drawLandmarks(canvasCtx, results.poseLandmarks,
-      { color: '#818CF8', lineWidth: 1 });
+                  {color: '#fff', lineWidth: 2});
     canvasCtx.restore();
 
-    // Posture analysis logic
-    if (goodPosture) {
-      const isBadPosture = badPosture(landmarks, goodPosture);
-      setPostureStatus(isBadPosture ? 'BAD' : 'GOOD');
-      
-      if (isBadPosture) {
-        badPostureCount++;
-        if (badPostureCount >= 60) {
-          showNotification("Time to correct your posture!");
-          badPostureCount = 0;
-        }
-      } else {
+    if(btnSelected) {
+      goodPosture = landmarks;
+      console.log("Calibrate button was clicked. New landmarks have been saved.");
+      setBtn(false);
+    }
+
+    if(!goodPosture) {
+      return;
+    }
+    
+    const isPostureBad = badPosture(landmarks, goodPosture);
+    
+    if(isPostureBad) {
+      badPostureCount++;
+      updatePostureStatus(false);
+      if(badPostureCount >= 60) {
+        showNotification("వెన్నెముక సరిగ్గా ఉంచండి!");
         badPostureCount = 0;
       }
+      // Update bad posture time
+      const now = Date.now();
+      const timeDiff = (now - dailyStats.lastUpdate) / 1000;
+      setDailyStats(prev => ({
+        ...prev,
+        badPostureTime: prev.badPostureTime + timeDiff,
+        lastUpdate: now
+      }));
+    } else {
+      badPostureCount = 0;
+      updatePostureStatus(true);
+      // Update good posture time
+      const now = Date.now();
+      const timeDiff = (now - dailyStats.lastUpdate) / 1000;
+      setDailyStats(prev => ({
+        ...prev,
+        goodPostureTime: prev.goodPostureTime + timeDiff,
+        lastUpdate: now
+      }));
     }
-  };
-
-  const calibratePose = () => {
-    if (postureRef.current === -1) return;
-    goodPosture = results.poseLandmarks;
-    setCalibrationMode(false);
-  };
-
-  // Utility functions
-  const badPosture = (curr, ideal) => {
-    const lookingDown = (curr[0].y - ideal[0].y) > (ideal[9].y - ideal[0].y);
-    const faceIsClose = (ideal[0].z - curr[0].z) > 0.5;
-    return lookingDown || faceIsClose;
-  };
-
-  const showNotification = (text) => {
-    if (Notification.permission === "granted") {
-      new Notification(text);
-    }
-  };
+  }
 
   useEffect(() => {
-    const pose = new Pose({
-      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
-    });
-
+    const pose = new Pose({locateFile: (file) => {
+      return `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`;
+    }});
+    
     pose.setOptions({
       modelComplexity: 1,
       smoothLandmarks: true,
+      enableSegmentation: false,
+      smoothSegmentation: false,
       minDetectionConfidence: 0.5,
       minTrackingConfidence: 0.5
     });
-
+    
     pose.onResults(onResults);
-
-    if (webcamRef.current) {
+    
+    if(typeof webcamRef.current !== 'undefined' && webcamRef.current !== null) {
       const camera = new cam.Camera(webcamRef.current.video, {
         onFrame: async () => {
-          await pose.send({ image: webcamRef.current.video });
+          await pose.send({image: webcamRef.current.video});
         },
         width: 640,
         height: 480
@@ -464,96 +530,51 @@ const PostureGuard = () => {
       camera.start();
     }
 
-    Notification.requestPermission();
+    if(!("Notification" in window)) {
+      alert("Browser does not support desktop notification");
+    } else {
+      Notification.requestPermission();
+    }
+
+    // Check for midnight reset
+    const midnightCheck = setInterval(() => {
+      const currentDate = new Date().toLocaleDateString();
+      if (currentDate !== dailyStats.date) {
+        setDailyStats({
+          date: currentDate,
+          goodPostureTime: 0,
+          badPostureTime: 0,
+          lastUpdate: Date.now()
+        });
+      }
+    }, 60000); // Check every minute
+
+    return () => clearInterval(midnightCheck);
   }, []);
 
   return (
-    <div className="min-h-screen bg-gray-50 py-8">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-gray-900 mb-2">PostureGuard</h1>
-          <p className="text-lg text-gray-600">Your personal posture assistant</p>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
-          <div className="relative rounded-lg overflow-hidden shadow-lg bg-white p-6">
-            <div className="aspect-w-4 aspect-h-3">
-              <Webcam
-                ref={webcamRef}
-                className="absolute inset-0 w-full h-full object-cover rounded-lg"
-                width={640}
-                height={480}
-              />
-              <canvas
-                ref={canvasRef}
-                className="absolute inset-0 w-full h-full"
-                width={640}
-                height={480}
-              />
-            </div>
-          </div>
-
-          <div className="space-y-6">
-            {isLoading ? (
-              <Alert>
-                <AlertDescription>
-                  Loading pose detection model... Please enable your camera.
-                </AlertDescription>
-              </Alert>
-            ) : (
-              <div className="bg-white rounded-lg shadow-lg p-6 space-y-6">
-                <div className="space-y-4">
-                  <h2 className="text-2xl font-semibold text-gray-900">
-                    {calibrationMode ? 'Calibration Mode' : 'Tracking Mode'}
-                  </h2>
-                  
-                  {calibrationMode ? (
-                    <div className="space-y-4">
-                      <p className="text-gray-600">
-                        Please sit with good posture and click calibrate to begin tracking.
-                      </p>
-                      <ol className="list-decimal list-inside space-y-2 text-gray-600">
-                        <li>Position your webcam at arm's length</li>
-                        <li>Sit upright with good posture</li>
-                        <li>Ensure your head and shoulders are visible</li>
-                      </ol>
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      <div className="flex items-center space-x-2">
-                        <span className="text-gray-700">Current Posture:</span>
-                        <span className={`font-semibold ${
-                          postureStatus === 'GOOD' ? 'text-green-600' : 
-                          postureStatus === 'BAD' ? 'text-red-600' : 
-                          'text-gray-600'
-                        }`}>
-                          {postureStatus}
-                        </span>
-                      </div>
-                    </div>
-                  )}
-                  
-                  <button
-                    onClick={calibratePose}
-                    disabled={postureRef.current === -1}
-                    className={`w-full py-2 px-4 rounded-md text-white font-medium transition-colors
-                      ${postureRef.current === -1 
-                        ? 'bg-gray-400 cursor-not-allowed' 
-                        : 'bg-indigo-600 hover:bg-indigo-700'}`}
-                  >
-                    {calibrationMode ? 'Calibrate' : 'Recalibrate'}
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
+    <div className="App">
+      <LoadingScreen/>
+      <Menu postureRef={postureRef} dailyStats={dailyStats} />
+      <div className="display">
+        <Webcam
+          ref={webcamRef}
+          className="webcam"
+          width="640px"
+          height="480px"
+        />
+        <canvas
+          ref={canvasRef}
+          className="canvas"
+          width="640px"
+          height="480px"
+        />
       </div>
     </div>
   );
-};
+}
 
-export default PostureGuard;
+export default App;
 ```
 
 # src/App.test.js
@@ -583,51 +604,282 @@ export function CalibrateBtn(props) {
 # src/components/LoadingScreen.js
 
 ```js
-export function LoadingScreen(){
-    return(
+export function LoadingScreen() {
+    return (
         <div className="loading-screen">
             <div className="lds-dual-ring"/>
-            <p>Loading the pose estimation model... In the meantime, please enable your camera!</p>
+            <p style={{ fontFamily: 'Noto Sans Telugu, sans-serif' }}>
+                లోడ్ అవుతోంది... దయచేసి మీ కెమెరాను ఆన్ చేయండి
+            </p>
         </div>
     )
 }
 ```
 
+# src/components/Logo.js
+
+```js
+import React from 'react';
+import { teluguTranslations } from '../translations/te';
+
+const Logo = () => {
+  return (
+    <div className="flex items-center gap-3">
+      <div className="text-3xl font-bold text-blue-600" style={{ fontFamily: 'Noto Sans Telugu, sans-serif' }}>
+        {teluguTranslations.appName}
+      </div>
+    </div>
+  );
+};
+
+export default Logo;
+```
+
 # src/components/Menu.js
 
 ```js
-import {useState} from 'react';
-import {MenuHeader} from './MenuHeader';
-import {CalibrateBtn} from './CalibrateBtn';
-import {PostureStatus} from './PostureStatus';
-import logo from '../logo.svg';
+import React, { useState, useEffect } from 'react';
 
 export let btnSelected = false;
-export function setBtn(value){
+export function setBtn(value) {
   btnSelected = value;
 }
 
-export function Menu(props) {
-    //two possibe states: Calibration, Tracking
-    const [state, setState] = useState("Calibration");
+// Daily exercises specifically for back pain
+const backExercises = [
+  {
+    id: 1,
+    name: "సున్నిత వెన్నెముక వ్యాయామం", // Gentle spine stretch
+    duration: "2 నిమిషాలు", // 2 minutes
+    description: "కుర్చీలో కూర్చుని, మెల్లగా ముందుకు వంగండి"
+  },
+  {
+    id: 2,
+    name: "నడక", // Walking
+    duration: "10 నిమిషాలు", // 10 minutes
+    description: "మెల్లగా ఇంట్లో నడవండి"
+  },
+  {
+    id: 3,
+    name: "భుజాల వ్యాయామం", // Shoulder rolls
+    duration: "1 నిమిషం", // 1 minute
+    description: "భుజాలను వృత్తాకారంగా కదపండి"
+  }
+];
+
+const formatTime = (seconds) => {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  return `${hours}గం ${minutes}ని`;
+};
+
+const getPostureScore = (stats) => {
+  const totalTime = stats.goodPostureTime + stats.badPostureTime;
+  if (totalTime === 0) return 0;
+  return Math.round((stats.goodPostureTime / totalTime) * 100);
+};
+
+const WeeklyProgress = ({ dailyStats }) => {
+  const weeklyData = dailyStats.weeklyScores || [];
   
-    const calibratePose = ()=>{
-      if(props.postureRef.current == -1){ //calibrate button selected but posture is undetected
-        console.log("Cannot calibrate. No pose is detected.");
-      } else { //there is a posture detected
-        btnSelected = true;
-        setState("Tracking");
-      }
-    }
-  
-    return (
-      <div className="menu">
-        <img src={logo} className="logo" alt="logo" />
-        <MenuHeader state={state}/>
-        <PostureStatus state={state}/>
-        <CalibrateBtn state={state} onClickCallback={()=>calibratePose()}/>
+  return (
+    <div className="mt-4 p-4 bg-blue-50 rounded-lg" style={{ fontFamily: 'Noto Sans Telugu, sans-serif' }}>
+      <h3 className="text-lg font-semibold mb-2">వారపు పురోగతి:</h3>
+      <div className="flex space-x-2">
+        {weeklyData.map((score, index) => (
+          <div 
+            key={index}
+            className="flex-1 bg-white p-2 rounded text-center"
+            title={`Day ${index + 1}: ${score}%`}
+          >
+            <div className="h-20 relative bg-gray-100 rounded">
+              <div 
+                className="absolute bottom-0 w-full bg-blue-500 rounded-b"
+                style={{ height: `${score}%` }}
+              />
+            </div>
+            <div className="mt-1 text-sm">{index + 1}</div>
+          </div>
+        ))}
       </div>
-    )
+    </div>
+  );
+};
+
+const ExerciseTracker = ({ state }) => {
+  const [completedExercises, setCompletedExercises] = useState(() => {
+    const saved = localStorage.getItem('completedExercises');
+    return saved ? JSON.parse(saved) : {
+      date: new Date().toLocaleDateString(),
+      exercises: []
+    };
+  });
+
+  useEffect(() => {
+    localStorage.setItem('completedExercises', JSON.stringify(completedExercises));
+  }, [completedExercises]);
+
+  const toggleExercise = (id) => {
+    setCompletedExercises(prev => ({
+      ...prev,
+      exercises: prev.exercises.includes(id) 
+        ? prev.exercises.filter(exId => exId !== id)
+        : [...prev.exercises, id]
+    }));
+  };
+
+  if (state !== "Tracking") return null;
+
+  return (
+    <div className="mt-6 p-4 bg-blue-50 rounded-lg" style={{ fontFamily: 'Noto Sans Telugu, sans-serif' }}>
+      <h3 className="text-xl font-semibold mb-4">నేటి వ్యాయామాలు:</h3>
+      <div className="space-y-4">
+        {backExercises.map(exercise => (
+          <div 
+            key={exercise.id}
+            className="flex items-center space-x-3 bg-white p-3 rounded-lg"
+          >
+            <input
+              type="checkbox"
+              checked={completedExercises.exercises.includes(exercise.id)}
+              onChange={() => toggleExercise(exercise.id)}
+              className="w-5 h-5"
+            />
+            <div>
+              <div className="font-semibold">{exercise.name}</div>
+              <div className="text-sm text-gray-600">{exercise.duration}</div>
+              <div className="text-sm text-gray-500">{exercise.description}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const PainTracker = ({ state }) => {
+  const [painLevel, setPainLevel] = useState(() => {
+    const saved = localStorage.getItem('painTracker');
+    return saved ? JSON.parse(saved) : {
+      date: new Date().toLocaleDateString(),
+      level: 0,
+      history: []
+    };
+  });
+
+  useEffect(() => {
+    localStorage.setItem('painTracker', JSON.stringify(painLevel));
+  }, [painLevel]);
+
+  if (state !== "Tracking") return null;
+
+  return (
+    <div className="mt-6 p-4 bg-blue-50 rounded-lg" style={{ fontFamily: 'Noto Sans Telugu, sans-serif' }}>
+      <h3 className="text-xl font-semibold mb-4">నొప్పి స్థాయి:</h3>
+      <div className="space-y-2">
+        <div className="flex items-center space-x-4">
+          <input
+            type="range"
+            min="0"
+            max="10"
+            value={painLevel.level}
+            onChange={(e) => setPainLevel(prev => ({
+              ...prev,
+              level: parseInt(e.target.value),
+              history: [...prev.history, {
+                date: new Date().toLocaleDateString(),
+                level: parseInt(e.target.value)
+              }]
+            }))}
+            className="w-full"
+          />
+          <span className="font-bold text-lg">{painLevel.level}</span>
+        </div>
+        <div className="text-sm text-gray-600">
+          0 = నొప్పి లేదు, 10 = చాలా నొప్పి
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const MenuHeader = ({ state, dailyStats }) => {
+  if (state === "Calibration") {
+    return (
+      <div>
+        <h1 className="text-4xl font-bold text-blue-600 mb-4" style={{ fontFamily: 'Noto Sans Telugu, sans-serif' }}>
+          వెన్నెముక రక్షకుడు
+        </h1>
+        <h2 className="text-2xl mb-4" style={{ fontFamily: 'Noto Sans Telugu, sans-serif' }}>
+          ప్రారంభించడానికి
+        </h2>
+        <ol className="space-y-4 text-lg" style={{ fontFamily: 'Noto Sans Telugu, sans-serif' }}>
+          <li>1. కెమెరాను చేతి దూరంలో ఉంచండి</li>
+          <li>2. సరైన భంగిమలో కూర్చోండి</li>
+          <li>3. 'సెట్ చేయండి' బటన్ నొక్కండి</li>
+          <li>4. పనిచేసుకోండి - మేము మీకు గుర్తు చేస్తాము!</li>
+        </ol>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <h1 className="text-4xl font-bold text-blue-600 mb-4" style={{ fontFamily: 'Noto Sans Telugu, sans-serif' }}>
+        వెన్నెముక రక్షకుడు
+      </h1>
+      <div className="bg-blue-50 p-4 rounded-lg space-y-3" style={{ fontFamily: 'Noto Sans Telugu, sans-serif' }}>
+        <div className="text-lg">
+          <div>మంచి భంగిమ సమయం: {formatTime(dailyStats.goodPostureTime)}</div>
+          <div>తప్పు భంగిమ సమయం: {formatTime(dailyStats.badPostureTime)}</div>
+          <div className="text-xl font-semibold">రోజు స్కోరు: {getPostureScore(dailyStats)}%</div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const PostureStatus = ({ state }) => {
+  if (state === "Tracking") {
+    return (
+      <div className="mt-4" style={{ fontFamily: 'Noto Sans Telugu, sans-serif' }}>
+        <h4 className="text-lg">
+          ప్రస్తుత భంగిమ: <span className="posture-status"></span>
+        </h4>
+      </div>
+    );
+  }
+  return null;
+};
+
+export function Menu({ postureRef, dailyStats }) {
+  const [state, setState] = useState("Calibration");
+  
+  const calibratePose = () => {
+    if (postureRef.current === -1) {
+      console.log("Cannot calibrate. No pose is detected.");
+    } else {
+      btnSelected = true;
+      setState("Tracking");
+    }
+  };
+  
+  return (
+    <div className="menu overflow-auto max-h-screen">
+      <MenuHeader state={state} dailyStats={dailyStats} />
+      <PostureStatus state={state} />
+      <WeeklyProgress dailyStats={dailyStats} />
+      <ExerciseTracker state={state} />
+      <PainTracker state={state} />
+      <button 
+        className="btn mt-6 mb-6"
+        onClick={calibratePose}
+        style={{ fontFamily: 'Noto Sans Telugu, sans-serif' }}
+      >
+        {state === "Calibration" ? 'సెట్ చేయండి' : 'మళ్ళీ సెట్ చేయండి'}
+      </button>
+    </div>
+  );
 }
 ```
 
@@ -658,21 +910,7 @@ export function MenuHeader(props) {
 }
 ```
 
-# src/components/PostureStatus.js
-
-```js
-export function PostureStatus(props) {
-    if(props.state=="Calibration"){
-      return;
-    } else if(props.state=="Tracking"){
-      return(
-        <h4 className="posture-status">Posture: </h4>
-      )
-    }
-}
-```
-
-# src/components/ui/alert.js
+# src/components/PostureGuard.js
 
 ```js
 import React, { useRef, useEffect, useState } from 'react';
@@ -681,7 +919,8 @@ import * as cam from '@mediapipe/camera_utils';
 import * as mediapipePose from '@mediapipe/pose';
 import { drawConnectors, drawLandmarks } from '@mediapipe/drawing_utils';
 import Webcam from 'react-webcam';
-import { Alert, AlertDescription } from './components/ui/alert';
+import { Alert, AlertDescription } from './ui/alert';
+import { badPosture, showNotification } from '../utilities';
 
 const PostureGuard = () => {
   const canvasRef = useRef(null);
@@ -690,24 +929,73 @@ const PostureGuard = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [calibrationMode, setCalibrationMode] = useState(true);
   const [postureStatus, setPostureStatus] = useState('UNKNOWN');
+  const [currentPoseLandmarks, setCurrentPoseLandmarks] = useState(null);
+  const [dailyStats, setDailyStats] = useState(() => {
+    const saved = localStorage.getItem('dailyPostureStats');
+    return saved ? JSON.parse(saved) : {
+      date: new Date().toLocaleDateString(),
+      goodPostureTime: 0,
+      badPostureTime: 0,
+      lastUpdate: Date.now()
+    };
+  });
   
   let goodPosture = null;
   let badPostureCount = 0;
 
+  useEffect(() => {
+    localStorage.setItem('dailyPostureStats', JSON.stringify(dailyStats));
+  }, [dailyStats]);
+
+  useEffect(() => {
+    const checkDate = () => {
+      const currentDate = new Date().toLocaleDateString();
+      if (currentDate !== dailyStats.date) {
+        setDailyStats({
+          date: currentDate,
+          goodPostureTime: 0,
+          badPostureTime: 0,
+          lastUpdate: Date.now()
+        });
+      }
+    };
+
+    const interval = setInterval(checkDate, 60000);
+    return () => clearInterval(interval);
+  }, [dailyStats.date]);
+
+  const updatePostureTime = (isGoodPosture) => {
+    const now = Date.now();
+    const timeDiff = (now - dailyStats.lastUpdate) / 1000;
+
+    setDailyStats(prev => ({
+      ...prev,
+      goodPostureTime: isGoodPosture ? prev.goodPostureTime + timeDiff : prev.goodPostureTime,
+      badPostureTime: isGoodPosture ? prev.badPostureTime : prev.badPostureTime + timeDiff,
+      lastUpdate: now
+    }));
+  };
+
   const onResults = (results) => {
     if (isLoading) {
       setIsLoading(false);
+      console.log("HPE model finished loading.");
+      changeStyleProperty("--loader-display", "none");
     }
 
     if (!results.poseLandmarks) {
       postureRef.current = -1;
+      setPostureStatus('UNKNOWN');
+      changeStyleProperty("--btn-color", "rgba(0, 105, 237, 0.25)");
       return;
     }
 
     const landmarks = results.poseLandmarks;
+    setCurrentPoseLandmarks(landmarks);
     postureRef.current = null;
+    changeStyleProperty("--btn-color", "rgba(0, 105, 237, 1)");
 
-    // Canvas drawing logic
+    // Drawing logic (keeping your existing canvas code)
     const canvasElement = canvasRef.current;
     const canvasCtx = canvasElement.getContext("2d");
     
@@ -717,22 +1005,22 @@ const PostureGuard = () => {
     canvasCtx.save();
     canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
     
-    // Draw pose landmarks with a modern aesthetic
+    canvasCtx.globalCompositeOperation = 'source-over';
     drawConnectors(canvasCtx, results.poseLandmarks, mediapipePose.POSE_CONNECTIONS,
-      { color: '#4F46E5', lineWidth: 2 });
+                   {color: '#1E40AF', lineWidth: 4});
     drawLandmarks(canvasCtx, results.poseLandmarks,
-      { color: '#818CF8', lineWidth: 1 });
+                  {color: '#2563EB', lineWidth: 2});
     canvasCtx.restore();
 
-    // Posture analysis logic
     if (goodPosture) {
       const isBadPosture = badPosture(landmarks, goodPosture);
       setPostureStatus(isBadPosture ? 'BAD' : 'GOOD');
+      updatePostureTime(!isBadPosture);
       
       if (isBadPosture) {
         badPostureCount++;
         if (badPostureCount >= 60) {
-          showNotification("Time to correct your posture!");
+          showNotification("వెన్నెముక సరిగ్గా ఉంచండి!");
           badPostureCount = 0;
         }
       } else {
@@ -741,23 +1029,22 @@ const PostureGuard = () => {
     }
   };
 
+  const formatTime = (seconds) => {
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    return `${hours}గం ${minutes}ని`;
+  };
+
+  const getPostureScore = () => {
+    const totalTime = dailyStats.goodPostureTime + dailyStats.badPostureTime;
+    if (totalTime === 0) return 0;
+    return Math.round((dailyStats.goodPostureTime / totalTime) * 100);
+  };
+
   const calibratePose = () => {
     if (postureRef.current === -1) return;
-    goodPosture = results.poseLandmarks;
+    goodPosture = currentPoseLandmarks;
     setCalibrationMode(false);
-  };
-
-  // Utility functions
-  const badPosture = (curr, ideal) => {
-    const lookingDown = (curr[0].y - ideal[0].y) > (ideal[9].y - ideal[0].y);
-    const faceIsClose = (ideal[0].z - curr[0].z) > 0.5;
-    return lookingDown || faceIsClose;
-  };
-
-  const showNotification = (text) => {
-    if (Notification.permission === "granted") {
-      new Notification(text);
-    }
   };
 
   useEffect(() => {
@@ -785,86 +1072,90 @@ const PostureGuard = () => {
       camera.start();
     }
 
-    Notification.requestPermission();
+    if (Notification.permission !== 'granted') {
+      Notification.requestPermission();
+    }
   }, []);
 
   return (
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-gray-900 mb-2">PostureGuard</h1>
-          <p className="text-lg text-gray-600">Your personal posture assistant</p>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
-          <div className="relative rounded-lg overflow-hidden shadow-lg bg-white p-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* Camera View */}
+          <div className="relative rounded-xl overflow-hidden shadow-lg bg-white p-6">
             <div className="aspect-w-4 aspect-h-3">
               <Webcam
                 ref={webcamRef}
-                className="absolute inset-0 w-full h-full object-cover rounded-lg"
+                className="webcam"
                 width={640}
                 height={480}
               />
               <canvas
                 ref={canvasRef}
-                className="absolute inset-0 w-full h-full"
+                className="canvas"
                 width={640}
                 height={480}
               />
             </div>
           </div>
 
+          {/* Controls and Stats */}
           <div className="space-y-6">
             {isLoading ? (
               <Alert>
-                <AlertDescription>
-                  Loading pose detection model... Please enable your camera.
+                <AlertDescription className="text-xl" style={{ fontFamily: 'Noto Sans Telugu, sans-serif' }}>
+                  లోడ్ అవుతోంది... దయచేసి మీ కెమెరాను ఆన్ చేయండి
                 </AlertDescription>
               </Alert>
             ) : (
-              <div className="bg-white rounded-lg shadow-lg p-6 space-y-6">
-                <div className="space-y-4">
-                  <h2 className="text-2xl font-semibold text-gray-900">
-                    {calibrationMode ? 'Calibration Mode' : 'Tracking Mode'}
-                  </h2>
-                  
-                  {calibrationMode ? (
-                    <div className="space-y-4">
-                      <p className="text-gray-600">
-                        Please sit with good posture and click calibrate to begin tracking.
-                      </p>
-                      <ol className="list-decimal list-inside space-y-2 text-gray-600">
-                        <li>Position your webcam at arm's length</li>
-                        <li>Sit upright with good posture</li>
-                        <li>Ensure your head and shoulders are visible</li>
-                      </ol>
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      <div className="flex items-center space-x-2">
-                        <span className="text-gray-700">Current Posture:</span>
-                        <span className={`font-semibold ${
-                          postureStatus === 'GOOD' ? 'text-green-600' : 
-                          postureStatus === 'BAD' ? 'text-red-600' : 
-                          'text-gray-600'
-                        }`}>
-                          {postureStatus}
-                        </span>
+              <div className="bg-white rounded-xl shadow-lg p-6 space-y-6">
+                {calibrationMode ? (
+                  <div className="space-y-6" style={{ fontFamily: 'Noto Sans Telugu, sans-serif' }}>
+                    <h2 className="text-2xl font-semibold text-gray-900">ప్రారంభ సూచనలు:</h2>
+                    <ol className="space-y-4 text-lg">
+                      <li>1. కెమెరాను చేతి దూరంలో ఉంచండి</li>
+                      <li>2. సరైన భంగిమలో కూర్చోండి</li>
+                      <li>3. 'సెట్ చేయండి' బటన్ నొక్కండి</li>
+                      <li>4. పనిచేసుకోండి - మేము మీకు గుర్తు చేస్తాము!</li>
+                    </ol>
+                  </div>
+                ) : (
+                  <div className="space-y-6">
+                    <div style={{ fontFamily: 'Noto Sans Telugu, sans-serif' }}>
+                      <h2 className="text-2xl font-semibold text-gray-900 mb-4">నేటి వివరాలు:</h2>
+                      <div className="bg-blue-50 p-4 rounded-lg space-y-3">
+                        <p className="text-lg">మంచి భంగిమ సమయం: {formatTime(dailyStats.goodPostureTime)}</p>
+                        <p className="text-lg">తప్పు భంగిమ సమయం: {formatTime(dailyStats.badPostureTime)}</p>
+                        <p className="text-xl font-semibold">రోజు స్కోరు: {getPostureScore()}%</p>
                       </div>
                     </div>
-                  )}
-                  
-                  <button
-                    onClick={calibratePose}
-                    disabled={postureRef.current === -1}
-                    className={`w-full py-2 px-4 rounded-md text-white font-medium transition-colors
-                      ${postureRef.current === -1 
-                        ? 'bg-gray-400 cursor-not-allowed' 
-                        : 'bg-indigo-600 hover:bg-indigo-700'}`}
-                  >
-                    {calibrationMode ? 'Calibrate' : 'Recalibrate'}
-                  </button>
-                </div>
+                    
+                    <div className="flex items-center space-x-2" style={{ fontFamily: 'Noto Sans Telugu, sans-serif' }}>
+                      <span className="text-xl">ప్రస్తుత భంగిమ:</span>
+                      <span className={`text-xl font-semibold ${
+                        postureStatus === 'GOOD' ? 'text-green-600' : 
+                        postureStatus === 'BAD' ? 'text-red-600' : 
+                        'text-gray-600'
+                      }`}>
+                        {postureStatus === 'GOOD' ? 'బాగుంది' : 
+                         postureStatus === 'BAD' ? 'సరిగ్గా లేదు' : 
+                         'తెలియదు'}
+                      </span>
+                    </div>
+                  </div>
+                )}
+                
+                <button
+                  onClick={calibratePose}
+                  disabled={postureRef.current === -1}
+                  className={`w-full py-4 px-6 rounded-xl text-white font-medium text-xl transition-colors
+                    ${postureRef.current === -1 
+                      ? 'bg-gray-400 cursor-not-allowed' 
+                      : 'bg-blue-600 hover:bg-blue-700'}`}
+                  style={{ fontFamily: 'Noto Sans Telugu, sans-serif' }}
+                >
+                  {calibrationMode ? 'సెట్ చేయండి' : 'మళ్ళీ సెట్ చేయండి'}
+                </button>
               </div>
             )}
           </div>
@@ -877,14 +1168,61 @@ const PostureGuard = () => {
 export default PostureGuard;
 ```
 
+# src/components/PostureStatus.js
+
+```js
+export function PostureStatus(props) {
+    if(props.state=="Calibration"){
+      return;
+    } else if(props.state=="Tracking"){
+      return(
+        <h4 className="posture-status">Posture: </h4>
+      )
+    }
+}
+```
+
+# src/components/ui/alert.js
+
+```js
+import React from "react"
+
+export const Alert = React.forwardRef(({ className, variant, ...props }, ref) => (
+  <div
+    ref={ref}
+    role="alert"
+    className={`relative w-full rounded-lg border p-4 ${
+      variant === "destructive" 
+        ? "border-red-500/50 text-red-500" 
+        : "border-gray-200 text-gray-700"
+    }`}
+    {...props}
+  />
+))
+Alert.displayName = "Alert"
+
+export const AlertDescription = React.forwardRef(({ className, ...props }, ref) => (
+  <div
+    ref={ref}
+    className="text-sm [&_p]:leading-relaxed"
+    {...props}
+  />
+))
+AlertDescription.displayName = "AlertDescription"
+```
+
 # src/index.css
 
 ```css
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 :root {
   --loader-display: flex;
   --btn-color: rgba(0, 105, 237, 1);
   --posture-status: "UNKNOWN";
-  --posture-status-color: black;
+  --posture-status-color: #6b7280;  /* gray-500 */
 }
 
 body {
@@ -895,12 +1233,6 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
-
-code {
-  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
-    monospace;
-}
-
 ```
 
 # src/index.js
@@ -960,24 +1292,63 @@ import '@testing-library/jest-dom';
 
 ```
 
+# src/translations/te.js
+
+```js
+export const teluguTranslations = {
+    appName: "వెన్నెముక రక్షకుడు", // VenneMuka Rakshakudu (Back Protector)
+    welcome: "స్వాగతం!",
+    loading: "లోడ్ అవుతోంది... దయచేసి మీ కెమెరాను ఆన్ చేయండి",
+    calibrationTitle: "ప్రారంభ సెట్టింగులు",
+    trackingTitle: "మీ భంగిమను గమనిస్తోంది",
+    instructions: {
+      step1: "1. కెమెరాను చేతి దూరంలో ఉంచండి",
+      step2: "2. సరైన భంగిమలో కూర్చోండి",
+      step3: "3. 'సెట్ చేయండి' బటన్ నొక్కండి",
+      step4: "4. పనిచేసుకోండి - మీరు ముందుకు వంగితే మేము తెలియజేస్తాము!"
+    },
+    calibrateButton: "సెట్ చేయండి",
+    recalibrateButton: "మళ్ళీ సెట్ చేయండి",
+    currentPosture: "ప్రస్తుత భంగిమ:",
+    postureStatuses: {
+      unknown: "తెలియదు",
+      good: "బాగుంది",
+      bad: "సరిగ్గా లేదు"
+    },
+    notifications: {
+      badPosture: "దయచేసి మీ భంగిమను సరిచేసుకోండి!"
+    },
+    recalibrationTip: "మళ్ళీ సెట్ చేయాలంటే, సరిగ్గా కూర్చుని 'మళ్ళీ సెట్ చేయండి' నొక్కండి"
+  };
+```
+
 # src/utilities.js
 
 ```js
-export function changeStyleProperty(property, value){
+export function changeStyleProperty(property, value) {
   document.documentElement.style.setProperty(property, value);
 }
 
-export function badPosture(currLandmarks, idealLandmarks){ //returns true if the posture is bad
-  //person is looking down
-  let lookingDown = (currLandmarks[0]['y'] - idealLandmarks[0]['y']) >  (idealLandmarks[9]['y'] - idealLandmarks[0]['y']);
-  //person face is closer to the screen
-  let faceIsClose = ((idealLandmarks[0]['z'] - currLandmarks[0]['z'])>0.5);
-
-  return(lookingDown || faceIsClose);
+export function updatePostureStatus(isGood) {
+  if (isGood) {
+    changeStyleProperty('--posture-status', '"బాగుంది"');
+    changeStyleProperty('--posture-status-color', '#22c55e');
+  } else {
+    changeStyleProperty('--posture-status', '"సరిగ్గా లేదు"');
+    changeStyleProperty('--posture-status-color', '#ef4444');
+  }
 }
 
-export function showNotification(notificationText){
-  new Notification(notificationText);
+export function badPosture(currLandmarks, idealLandmarks) {
+  let lookingDown = (currLandmarks[0]['y'] - idealLandmarks[0]['y']) > (idealLandmarks[9]['y'] - idealLandmarks[0]['y']);
+  let faceIsClose = ((idealLandmarks[0]['z'] - currLandmarks[0]['z']) > 0.5);
+  return (lookingDown || faceIsClose);
+}
+
+export function showNotification(message) {
+  if (Notification.permission === "granted") {
+    new Notification(message);
+  }
 }
 ```
 
@@ -985,13 +1356,15 @@ export function showNotification(notificationText){
 
 ```js
 module.exports = {
-    content: [
-      "./src/**/*.{js,jsx,ts,tsx}",
-    ],
-    theme: {
-      extend: {},
-    },
-    plugins: [],
-  }
+  content: [
+    "./src/**/*.{js,jsx,ts,tsx}",
+  ],
+  theme: {
+    extend: {},
+  },
+  plugins: [
+    require('@tailwindcss/aspect-ratio'),
+  ],
+}
 ```
 

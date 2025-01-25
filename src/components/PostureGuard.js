@@ -15,25 +15,72 @@ const PostureGuard = () => {
   const [calibrationMode, setCalibrationMode] = useState(true);
   const [postureStatus, setPostureStatus] = useState('UNKNOWN');
   const [currentPoseLandmarks, setCurrentPoseLandmarks] = useState(null);
+  const [dailyStats, setDailyStats] = useState(() => {
+    const saved = localStorage.getItem('dailyPostureStats');
+    return saved ? JSON.parse(saved) : {
+      date: new Date().toLocaleDateString(),
+      goodPostureTime: 0,
+      badPostureTime: 0,
+      lastUpdate: Date.now()
+    };
+  });
   
   let goodPosture = null;
   let badPostureCount = 0;
 
+  useEffect(() => {
+    localStorage.setItem('dailyPostureStats', JSON.stringify(dailyStats));
+  }, [dailyStats]);
+
+  useEffect(() => {
+    const checkDate = () => {
+      const currentDate = new Date().toLocaleDateString();
+      if (currentDate !== dailyStats.date) {
+        setDailyStats({
+          date: currentDate,
+          goodPostureTime: 0,
+          badPostureTime: 0,
+          lastUpdate: Date.now()
+        });
+      }
+    };
+
+    const interval = setInterval(checkDate, 60000);
+    return () => clearInterval(interval);
+  }, [dailyStats.date]);
+
+  const updatePostureTime = (isGoodPosture) => {
+    const now = Date.now();
+    const timeDiff = (now - dailyStats.lastUpdate) / 1000;
+
+    setDailyStats(prev => ({
+      ...prev,
+      goodPostureTime: isGoodPosture ? prev.goodPostureTime + timeDiff : prev.goodPostureTime,
+      badPostureTime: isGoodPosture ? prev.badPostureTime : prev.badPostureTime + timeDiff,
+      lastUpdate: now
+    }));
+  };
+
   const onResults = (results) => {
     if (isLoading) {
       setIsLoading(false);
+      console.log("HPE model finished loading.");
+      changeStyleProperty("--loader-display", "none");
     }
 
     if (!results.poseLandmarks) {
       postureRef.current = -1;
+      setPostureStatus('UNKNOWN');
+      changeStyleProperty("--btn-color", "rgba(0, 105, 237, 0.25)");
       return;
     }
 
     const landmarks = results.poseLandmarks;
     setCurrentPoseLandmarks(landmarks);
     postureRef.current = null;
+    changeStyleProperty("--btn-color", "rgba(0, 105, 237, 1)");
 
-    // Canvas drawing logic
+    // Drawing logic (keeping your existing canvas code)
     const canvasElement = canvasRef.current;
     const canvasCtx = canvasElement.getContext("2d");
     
@@ -43,28 +90,40 @@ const PostureGuard = () => {
     canvasCtx.save();
     canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
     
-    // Draw pose landmarks with a modern aesthetic
+    canvasCtx.globalCompositeOperation = 'source-over';
     drawConnectors(canvasCtx, results.poseLandmarks, mediapipePose.POSE_CONNECTIONS,
-      { color: '#4F46E5', lineWidth: 2 });
+                   {color: '#1E40AF', lineWidth: 4});
     drawLandmarks(canvasCtx, results.poseLandmarks,
-      { color: '#818CF8', lineWidth: 1 });
+                  {color: '#2563EB', lineWidth: 2});
     canvasCtx.restore();
 
-    // Posture analysis logic
     if (goodPosture) {
       const isBadPosture = badPosture(landmarks, goodPosture);
       setPostureStatus(isBadPosture ? 'BAD' : 'GOOD');
+      updatePostureTime(!isBadPosture);
       
       if (isBadPosture) {
         badPostureCount++;
         if (badPostureCount >= 60) {
-          showNotification("Time to correct your posture!");
+          showNotification("వెన్నెముక సరిగ్గా ఉంచండి!");
           badPostureCount = 0;
         }
       } else {
         badPostureCount = 0;
       }
     }
+  };
+
+  const formatTime = (seconds) => {
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    return `${hours}గం ${minutes}ని`;
+  };
+
+  const getPostureScore = () => {
+    const totalTime = dailyStats.goodPostureTime + dailyStats.badPostureTime;
+    if (totalTime === 0) return 0;
+    return Math.round((dailyStats.goodPostureTime / totalTime) * 100);
   };
 
   const calibratePose = () => {
@@ -98,86 +157,90 @@ const PostureGuard = () => {
       camera.start();
     }
 
-    Notification.requestPermission();
+    if (Notification.permission !== 'granted') {
+      Notification.requestPermission();
+    }
   }, []);
 
   return (
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-gray-900 mb-2">PostureGuard</h1>
-          <p className="text-lg text-gray-600">Your personal posture assistant</p>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
-          <div className="relative rounded-lg overflow-hidden shadow-lg bg-white p-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* Camera View */}
+          <div className="relative rounded-xl overflow-hidden shadow-lg bg-white p-6">
             <div className="aspect-w-4 aspect-h-3">
               <Webcam
                 ref={webcamRef}
-                className="absolute inset-0 w-full h-full object-cover rounded-lg"
+                className="webcam"
                 width={640}
                 height={480}
               />
               <canvas
                 ref={canvasRef}
-                className="absolute inset-0 w-full h-full"
+                className="canvas"
                 width={640}
                 height={480}
               />
             </div>
           </div>
 
+          {/* Controls and Stats */}
           <div className="space-y-6">
             {isLoading ? (
               <Alert>
-                <AlertDescription>
-                  Loading pose detection model... Please enable your camera.
+                <AlertDescription className="text-xl" style={{ fontFamily: 'Noto Sans Telugu, sans-serif' }}>
+                  లోడ్ అవుతోంది... దయచేసి మీ కెమెరాను ఆన్ చేయండి
                 </AlertDescription>
               </Alert>
             ) : (
-              <div className="bg-white rounded-lg shadow-lg p-6 space-y-6">
-                <div className="space-y-4">
-                  <h2 className="text-2xl font-semibold text-gray-900">
-                    {calibrationMode ? 'Calibration Mode' : 'Tracking Mode'}
-                  </h2>
-                  
-                  {calibrationMode ? (
-                    <div className="space-y-4">
-                      <p className="text-gray-600">
-                        Please sit with good posture and click calibrate to begin tracking.
-                      </p>
-                      <ol className="list-decimal list-inside space-y-2 text-gray-600">
-                        <li>Position your webcam at arm's length</li>
-                        <li>Sit upright with good posture</li>
-                        <li>Ensure your head and shoulders are visible</li>
-                      </ol>
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      <div className="flex items-center space-x-2">
-                        <span className="text-gray-700">Current Posture:</span>
-                        <span className={`font-semibold ${
-                          postureStatus === 'GOOD' ? 'text-green-600' : 
-                          postureStatus === 'BAD' ? 'text-red-600' : 
-                          'text-gray-600'
-                        }`}>
-                          {postureStatus}
-                        </span>
+              <div className="bg-white rounded-xl shadow-lg p-6 space-y-6">
+                {calibrationMode ? (
+                  <div className="space-y-6" style={{ fontFamily: 'Noto Sans Telugu, sans-serif' }}>
+                    <h2 className="text-2xl font-semibold text-gray-900">ప్రారంభ సూచనలు:</h2>
+                    <ol className="space-y-4 text-lg">
+                      <li>1. కెమెరాను చేతి దూరంలో ఉంచండి</li>
+                      <li>2. సరైన భంగిమలో కూర్చోండి</li>
+                      <li>3. 'సెట్ చేయండి' బటన్ నొక్కండి</li>
+                      <li>4. పనిచేసుకోండి - మేము మీకు గుర్తు చేస్తాము!</li>
+                    </ol>
+                  </div>
+                ) : (
+                  <div className="space-y-6">
+                    <div style={{ fontFamily: 'Noto Sans Telugu, sans-serif' }}>
+                      <h2 className="text-2xl font-semibold text-gray-900 mb-4">నేటి వివరాలు:</h2>
+                      <div className="bg-blue-50 p-4 rounded-lg space-y-3">
+                        <p className="text-lg">మంచి భంగిమ సమయం: {formatTime(dailyStats.goodPostureTime)}</p>
+                        <p className="text-lg">తప్పు భంగిమ సమయం: {formatTime(dailyStats.badPostureTime)}</p>
+                        <p className="text-xl font-semibold">రోజు స్కోరు: {getPostureScore()}%</p>
                       </div>
                     </div>
-                  )}
-                  
-                  <button
-                    onClick={calibratePose}
-                    disabled={postureRef.current === -1}
-                    className={`w-full py-2 px-4 rounded-md text-white font-medium transition-colors
-                      ${postureRef.current === -1 
-                        ? 'bg-gray-400 cursor-not-allowed' 
-                        : 'bg-indigo-600 hover:bg-indigo-700'}`}
-                  >
-                    {calibrationMode ? 'Calibrate' : 'Recalibrate'}
-                  </button>
-                </div>
+                    
+                    <div className="flex items-center space-x-2" style={{ fontFamily: 'Noto Sans Telugu, sans-serif' }}>
+                      <span className="text-xl">ప్రస్తుత భంగిమ:</span>
+                      <span className={`text-xl font-semibold ${
+                        postureStatus === 'GOOD' ? 'text-green-600' : 
+                        postureStatus === 'BAD' ? 'text-red-600' : 
+                        'text-gray-600'
+                      }`}>
+                        {postureStatus === 'GOOD' ? 'బాగుంది' : 
+                         postureStatus === 'BAD' ? 'సరిగ్గా లేదు' : 
+                         'తెలియదు'}
+                      </span>
+                    </div>
+                  </div>
+                )}
+                
+                <button
+                  onClick={calibratePose}
+                  disabled={postureRef.current === -1}
+                  className={`w-full py-4 px-6 rounded-xl text-white font-medium text-xl transition-colors
+                    ${postureRef.current === -1 
+                      ? 'bg-gray-400 cursor-not-allowed' 
+                      : 'bg-blue-600 hover:bg-blue-700'}`}
+                  style={{ fontFamily: 'Noto Sans Telugu, sans-serif' }}
+                >
+                  {calibrationMode ? 'సెట్ చేయండి' : 'మళ్ళీ సెట్ చేయండి'}
+                </button>
               </div>
             )}
           </div>
